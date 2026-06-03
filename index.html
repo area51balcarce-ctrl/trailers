@@ -1,0 +1,74 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>AREA 51 - Trailers Automáticos</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+body{margin:0;min-height:100vh;font-family:Arial;background:radial-gradient(circle at top,#3b0057,#05010a 65%,#000);padding:22px;box-sizing:border-box}
+.card{max-width:1050px;margin:auto;background:white;border-radius:18px;padding:24px;box-shadow:0 0 28px rgba(0,230,118,.45)}
+h1{margin:0 0 8px}.box{margin-top:20px;padding:16px;border-radius:14px;background:#f7f7f7;border:1px solid #ddd}
+input{padding:12px;border-radius:10px;border:1px solid #bbb}
+button{border:0;border-radius:999px;padding:12px 18px;font-weight:bold;cursor:pointer;color:white;background:linear-gradient(90deg,#00e676,#25d366)}
+button:disabled{opacity:.55}.status{margin-top:12px;font-weight:bold;white-space:pre-line}.ok{color:#0a8f3c}.error{color:#c62828}
+.progress{width:100%;height:16px;border-radius:999px;background:#ddd;overflow:hidden;margin-top:12px}.bar{height:100%;width:0;background:linear-gradient(90deg,#00e676,#25d366)}
+table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:8px;text-align:left}
+</style>
+</head>
+<body>
+<div class="card">
+<h1>AREA 51 - Trailers automáticos</h1>
+<p>Subí el Excel. Completa todos los juegos del Excel en la columna <b>Trailer</b> usando el primer resultado del canal <b>GameTrailers</b>.</p>
+
+<div class="box">
+<input id="archivo" type="file" accept=".xlsx,.xls">
+<button id="btn" onclick="procesar()">Completar todos los trailers</button>
+<div class="progress"><div id="bar" class="bar"></div></div>
+<div id="estado" class="status"></div>
+<div id="tabla"></div>
+</div>
+</div>
+
+<script>
+function norm(x){return String(x||"").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"")}
+function buscarIndice(headers,nombres){const h=headers.map(norm);for(const n of nombres){const i=h.indexOf(norm(n));if(i>=0)return i}return -1}
+async function procesar(){
+ const file=document.getElementById("archivo").files[0], estado=document.getElementById("estado"), tabla=document.getElementById("tabla"), bar=document.getElementById("bar"), btn=document.getElementById("btn");
+ tabla.innerHTML=""; bar.style.width="0%";
+ if(!file){estado.className="status error";estado.textContent="Primero elegí el Excel.";return}
+ btn.disabled=true; estado.className="status"; estado.textContent="Leyendo Excel...";
+ try{
+  const data=await file.arrayBuffer();
+  const wb=XLSX.read(data,{type:"array"});
+  const sheet=wb.SheetNames.includes("Inventario")?"Inventario":wb.SheetNames[0];
+  const ws=wb.Sheets[sheet];
+  const rows=XLSX.utils.sheet_to_json(ws,{header:1,defval:""});
+  const headers=rows[0].map(x=>String(x||"").trim());
+  const nombreI=buscarIndice(headers,["Nombre","Producto","Juego","Titulo","Título"]);
+  let trailerI=buscarIndice(headers,["Trailer"]);
+  if(nombreI<0) throw new Error("No encontré la columna Nombre.");
+  if(trailerI<0){trailerI=headers.length;headers.push("Trailer");rows[0]=headers}
+  const items=[];
+  for(let r=1;r<rows.length && true;r++){const nombre=String(rows[r][nombreI]||"").trim(); if(nombre) items.push({r,nombre})}
+  const ok=[], fail=[];
+  for(let i=0;i<items.length;i++){
+   const it=items[i]; bar.style.width=Math.round(((i+1)/items.length)*100)+"%"; estado.textContent=`Procesando ${i+1}/${items.length}: ${it.nombre}`;
+   try{
+    const resp=await fetch("/api/buscarTrailer?juego="+encodeURIComponent(it.nombre));
+    const j=await resp.json();
+    if(j.ok && j.url){rows[it.r][trailerI]=j.url; ok.push({nombre:it.nombre,url:j.url,titulo:j.title||""})}
+    else {fail.push({nombre:it.nombre,motivo:j.error||"Sin trailer"})}
+    await new Promise(r=>setTimeout(r,700));
+   }catch(e){fail.push({nombre:it.nombre,motivo:e.message||"Error"})}
+  }
+  wb.Sheets[sheet]=XLSX.utils.aoa_to_sheet(rows);
+  XLSX.writeFile(wb,"AREA51_Catalogo_TRAILERS_COMPLETO.xlsx");
+  estado.className="status ok"; estado.textContent=`Listo ✅\nOK: ${ok.length}\nRevisar: ${fail.length}`;
+  tabla.innerHTML=`<table><thead><tr><th>Juego</th><th>Resultado</th></tr></thead><tbody>${ok.map(x=>`<tr><td>${x.nombre}</td><td><a href="${x.url}" target="_blank">${x.url}</a><br>${x.titulo}</td></tr>`).join("")}${fail.map(x=>`<tr><td>${x.nombre}</td><td>${x.motivo}</td></tr>`).join("")}</tbody></table>`;
+ }catch(e){estado.className="status error";estado.textContent=e.message||"Error";}
+ finally{btn.disabled=false}
+}
+</script>
+</body>
+</html>
